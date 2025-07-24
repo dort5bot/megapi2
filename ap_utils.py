@@ -48,14 +48,17 @@ def get_price(symbol="BTCUSDT"):
     return float(requests.get(url).json()["price"])
 
 def auto_trade(symbol="BTCUSDT", signal="BEKLE"):
+    if not API_KEY or not API_SECRET:
+        return {"status": "NO_API_KEY"}
     if signal == "ALIM":
         usdt = get_balance("USDT")
         qty = round((usdt * 0.1) / get_price(symbol), 6)
         if qty > 0:
             return place_order(symbol, "BUY", qty)
     elif signal == "SATIŞ":
-        btc = get_balance("BTC")
-        qty = round(btc * 0.1, 6)
+        base_asset = symbol.replace("USDT", "")
+        bal = get_balance(base_asset)
+        qty = round(bal * 0.1, 6)
         if qty > 0:
             return place_order(symbol, "SELL", qty)
     return {"status": "NO_TRADE"}
@@ -166,7 +169,6 @@ def ap_command(period="24h", days=None):
     cvd = calculate_cvd(raw)
     avg_score = (now[0] + now[1] + now[2]) / 3
     auto_signal = get_autotrade_signal(avg_score, cvd)
-
     trade_result = auto_trade("BTCUSDT", auto_signal)
 
     return (f"Ap({period}) raporu\n"
@@ -176,6 +178,81 @@ def ap_command(period="24h", days=None):
             f"Balina Para Girişi (CVD): {cvd}M → {'Pozitif' if cvd>0 else 'Negatif'}\n"
             f"AutoTrade Sinyali: {auto_signal}\n"
             f"Emir Sonucu: {trade_result}")
+
+# ====================================================
+# ✅ RSI, MACD, EMA, ADX Hesaplamaları (/trend)
+# ====================================================
+def calculate_rsi(prices, period=14):
+    deltas = np.diff(prices)
+    seed = deltas[:period]
+    up = seed[seed >= 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    rs = up / down if down != 0 else 0
+    rsi = np.zeros_like(prices)
+    rsi[:period] = 100. - (100. / (1. + rs))
+    for i in range(period, len(prices)):
+        delta = deltas[i - 1]
+        upval = max(delta, 0)
+        downval = -min(delta, 0)
+        up = (up * (period - 1) + upval) / period
+        down = (down * (period - 1) + downval) / period
+        rs = up / down if down != 0 else 0
+        rsi[i] = 100. - (100. / (1. + rs))
+    return round(rsi[-1], 1)
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    exp1 = pd.Series(prices).ewm(span=fast, adjust=False).mean()
+    exp2 = pd.Series(prices).ewm(span=slow, adjust=False).mean()
+    macd = exp1 - exp2
+    signal_line = macd.ewm(span=signal, adjust=False).mean()
+    return "Yükseliş" if macd.iloc[-1] > signal_line.iloc[-1] else "Düşüş"
+
+def calculate_ema_trend(prices, period=50):
+    ema = pd.Series(prices).ewm(span=period, adjust=False).mean()
+    return "Yükseliş" if prices[-1] > ema.iloc[-1] else "Düşüş", period
+
+def calculate_adx(high, low, close, period=14):
+    df = pd.DataFrame({"High": high, "Low": low, "Close": close})
+    df["TR"] = (df["High"] - df["Low"]).abs()
+    df["+DM"] = df["High"].diff()
+    df["-DM"] = df["Low"].diff().abs()
+    df["+DM"] = np.where((df["+DM"] > df["-DM"]) & (df["+DM"] > 0), df["+DM"], 0.0)
+    df["-DM"] = np.where((df["-DM"] > df["+DM"]) & (df["-DM"] > 0), df["-DM"], 0.0)
+    tr14 = df["TR"].rolling(window=period).sum()
+    plus_dm14 = df["+DM"].rolling(window=period).sum()
+    minus_dm14 = df["-DM"].rolling(window=period).sum()
+    plus_di14 = 100 * (plus_dm14 / tr14)
+    minus_di14 = 100 * (minus_dm14 / tr14)
+    dx = (abs(plus_di14 - minus_di14) / (plus_di14 + minus_di14)) * 100
+    adx = dx.rolling(window=period).mean()
+    return round(adx.iloc[-1], 1)
+
+def calculate_trend_score(rsi, macd, ema_trend, adx):
+    score = 50
+    score += 10 if rsi < 30 else -10 if rsi > 70 else 0
+    score += 15 if macd == "Yükseliş" else -15
+    score += 15 if ema_trend == "Yükseliş" else -15
+    score += 10 if adx > 25 else -5
+    return min(100, max(0, score))
+
+def rsi_macd_command(coins):
+    msg = "📊 RSI & MACD & EMA-ADX Trend Analizi\n"
+    for coin in coins:
+        symbol = coin.upper() + "USDT"
+        closes, raw = get_klines(symbol, "1h", 100)
+        high = [float(x[2]) for x in raw]
+        low = [float(x[3]) for x in raw]
+        close = [float(x[4]) for x in raw]
+        rsi = calculate_rsi(closes)
+        macd = calculate_macd(closes)
+        ema_trend, ema_period = calculate_ema_trend(closes)
+        adx = calculate_adx(high, low, close)
+        score = calculate_trend_score(rsi, macd, ema_trend, adx)
+        signal = get_autotrade_signal(score, calculate_cvd(raw))
+        msg += (f"\n{coin.upper()}:\n"
+                f"RSI={rsi} | MACD={macd} | EMA Trend: {ema_trend}({ema_period}) | "
+                f"ADX: {adx} | alış:%{score} (sat:%{100-score}) | {signal}")
+    return msg
 
 # ====================================================
 # ✅ P Komutu

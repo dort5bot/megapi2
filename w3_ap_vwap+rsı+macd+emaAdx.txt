@@ -1,4 +1,10 @@
+✓✓✓✓
 
+♻️ harija çalışıyor 
+/ap revize sart
+/p cok iyi
+/trend cok iyi
+❗
 
 ------
 24-07-25
@@ -1178,6 +1184,7 @@ AutoTrade sinyali BEKLE geliyorsa, bu piyasanın kararsız olduğunu gösterir (
 Testten sonra:
 ✔ Eğer sonuçlar tutarlı gelirse → MegaBot modül entegrasyonuna geçeriz.
 ✔ Gerekirse küçük ayarlar (CVD hesap hassasiyeti, AutoTrade eşiği vb.) test sonuçlarına göre revize edilir.
+
 
 
 
